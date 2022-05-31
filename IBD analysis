@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# code to run IBD analysis pipeline
+# Steps:
+# 1. Phase vcf file using SHAPEIT
+# 2. Run pairwaise IBD analysis using refined-IBD
+# 3. Cluster pair-wise IBD results using EMI
+
+#requirements: 
+# plink: plink/1.9-gnu   
+# shapeit: https://mathgen.stats.ox.ac.uk/genetics_software/shapeit/shapeit.html
+#          shapeit.v2.904.3.10.0-693.11.6.el7.x86_64
+# genetic map: http://bochet.gcc.biostat.washington.edu/beagle/genetic_maps/ 
+#              https://alkesgroup.broadinstitute.org/Eagle/downloads/
+#              EAGLE/Eagle_v2.4.1/tables/genetic_map_hg38_chrs/genetic_map_hg38_chr${chr}.frmt.txt
+# reference genome: IMPUTE2/1000GP_Phase3/1000GP_Phase3.sample
+# reference panel (hap and legend files): SHAPEIT2_format_ref_panel/SHAPEIT2.ALL.chr${chr}_GRCh38.genotypes.20170504.hap.gz
+#                  SHAPEIT2_format_ref_panel/SHAPEIT2.ALL.chr${chr}_GRCh38.genotypes.20170504.legend.gz
+# Refined IBD: http://faculty.washington.edu/browning/refined-ibd/refined-ibd.04Dec18.pdf
+#              BEAGLE/refined-ibd.26Feb19.29e.jar
+
+
+# specificy working directory  and vcf file to analyse:
+DIR=${1}
+FILE=${2}
+
+cd $DIR
+
+# Run by chromosome
+for chr in {1..22} ; do  
+
+echo -e "Starting on chromosome ${chr}\nFile:\t$FILE.${chr}\n"
+
+
+## Step 1: split plink file by chomosome:
+
+plink --bfile $FILE --make-bed  --chr $chr --out $FILE.${chr}
+
+## Step 2: Phasing with SHAPEIT
+# This requires several reference files outlined above
+# When running pedigree data this step can fail due to mendelian errors.
+# Need to run twice, excluding the me teh second time
+
+
+echo -e "Phase with SHAPEIT:\n"
+
+/home/shared/tools/shapeit.v2.904.3.10.0-693.11.6.el7.x86_64/bin/shapeit -B /$DIR/$FILE.${chr} \
+        -M /home/shared/tools/EAGLE/Eagle_v2.4.1/tables/genetic_map_hg38_chrs/genetic_map_hg38_chr${chr}.frmt.txt --duohmm \
+        --input-ref /home/shared/reference/ReferenceGenome/SHAPEIT2_format_ref_panel/SHAPEIT2.ALL.chr${chr}_GRCh38.genotypes.20170504.hap.gz \
+ /home/shared/reference/ReferenceGenome/SHAPEIT2_format_ref_panel/SHAPEIT2.ALL.chr${chr}_GRCh38.genotypes.20170504.legend.gz /home/shared/reference/ReferenceGenome/IMPUTE2/1000GP_Phase3/1000GP_Phase3.sample \
+        --output-log /$DIR/$FILE.${chr}.out \
+        -O /$DIR/$FILE.${chr}.phased
+
+
+echo -e "should have run and given me errors. Exclude error SNPs.\n"
+
+/home/shared/tools/shapeit.v2.904.3.10.0-693.11.6.el7.x86_64/bin/shapeit -B /$DIR/$FILE.${chr} \
+--exclude-snp /$DIR/$FILE.${chr}.out.snp.strand.exclude \
+        -M /home/shared/tools/EAGLE/Eagle_v2.4.1/tables/genetic_map_hg38_chrs/genetic_map_hg38_chr${chr}.frmt.txt --duohmm \
+        --input-ref /home/shared/reference/ReferenceGenome/SHAPEIT2_format_ref_panel/SHAPEIT2.ALL.chr${chr}_GRCh38.genotypes.20170504.hap.gz \
+ /home/shared/reference/ReferenceGenome/SHAPEIT2_format_ref_panel/SHAPEIT2.ALL.chr${chr}_GRCh38.genotypes.20170504.legend.gz /home/shared/reference/ReferenceGenome/IMPUTE2/1000GP_Phase3/1000GP_Phase3.sample \
+        --output-log /$DIR/$FILE.${chr}.out \
+        -O /$DIR/$FILE.${chr}.phased
+
+echo -e "Phasing complete. Now making vcf file:\n"
+
+
+/home/shared/tools/shapeit.v2.904.3.10.0-693.11.6.el7.x86_64/bin/shapeit -convert \
+        --input-haps /$DIR/$FILE.${chr}.phased \
+        --output-vcf /$DIR/$FILE.${chr}.phased.vcf
+
+## Step 3: Run phased data through RefinedIBD
+
+echo -e "Running refinedIBD on chr${chr}:\n"
+
+java -Xmx3000m -jar /home/shared/tools/BEAGLE/refined-ibd.26Feb19.29e.jar map=/home/shared/tools/BEAGLE/plink.chr${chr}.GRCh38.map window=20 length=1 gt=$FILE.${chr}.phased.vcf out=$FILE.${chr}.phased.V1
+
+
+## Step 4: Run pairwise IBD data through EMI
+
+echo -e "Running EMI on refinedIBD output on chr ${chr}:\n"
+
+# Need to first unzip the ibd file, reformat and sort:
+gunzip $FILE.$chr.phased.V1.ibd.gz
+
+#print $1,$2-1,$3,$4-1,$6,$7,$8,"0","0";}' $FILE.${chr}.phased.V1.ibd > $FILE.${chr}.phased.V1.frmt.ibd
+
+sort -k5n,5 -k6n,6 $FILE.${chr}.phased.V1.frmt.ibd > $FILE.${chr}.phased.V1.sortd.ibd
+
+# Now run EMI:
+/home/shared/tools/emi/emi $FILE.${chr}.phased.V1.sortd.ibd -fam /$DIR/$FILE.${chr}.fam -wgt 7th 2 5  -win 5000 bp -den 0.5 $FILE.${chr}
+
+
+echo -e "Finished chr ${chr}. Moving on.\n"
+
+
+done
+
