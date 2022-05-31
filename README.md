@@ -1,6 +1,6 @@
 - 👋 Hi, I’m @R-niamh
-- 👀 I’m interested in genomics
-- 🌱 I’m currently learning running R code within a bash script (simple I know, but not something I ever tried before)
+- 👀 I’m interested in genomics, specifically genomics of psychiatric illness
+- 🌱 I’m currently learning how to run R code within a bash script (simple I know, but not something I ever tried before)
 - 💞️ I’m looking to collaborate on ... nothing right now but check back later!
 - 📫 How to reach me ...
 
